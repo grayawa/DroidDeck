@@ -43,7 +43,7 @@ tasks.register("checkSessionAssets") {
     dependsOn("stageRuntimeAssets")
     def assetsDir = layout.buildDirectory.dir("runtimeAssets")
     doLast {
-        def missing = sessionAssets.findAll { !new File(assetsDir.asFile, it.key).isFile() }
+        def missing = sessionAssets.findAll { !new File(assetsDir.get().asFile, it.key).isFile() }
         if (!missing.isEmpty()) {
             def lines = missing.collect { "  ${it.key}  (${it.value})" }.join("\n")
             throw new GradleException(
@@ -54,7 +54,7 @@ tasks.register("checkSessionAssets") {
                     "starts sessions that have no controller support, no DRM shim and, on a runtime with the\n" +
                     "hosted desktop, no desktop launcher.")
         }
-        def absent = optionalSessionAssets.findAll { !new File(assetsDir.asFile, it.key).isFile() }
+        def absent = optionalSessionAssets.findAll { !new File(assetsDir.get().asFile, it.key).isFile() }
         if (!absent.isEmpty()) {
             absent.each { println "session assets: optional ${it.key} not staged - ${it.value}" }
         }
