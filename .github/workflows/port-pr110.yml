@@ -1,0 +1,42 @@
+name: Port PR 110 chroot onto current DroidDeck
+on:
+  push:
+    branches:
+      - feature/chroot-pr110-on-0.5.0
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  port:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout latest fork branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Merge exact PR 110 series without downgrading upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags https://github.com/Droid-Deck/DroidDeck.git \
+            refs/pull/110/head:refs/remotes/upstream/pr110
+          echo "PR 110 head: $(git rev-parse refs/remotes/upstream/pr110)"
+          test "$(git rev-parse refs/remotes/upstream/pr110)" = "7439a4d5df51c84650540b8d70b8ad0206801478"
+          if ! git merge -s ort -X theirs --no-ff --no-commit refs/remotes/upstream/pr110; then
+            echo "::error::Automatic 3-way merge has unresolved conflicts; branch left unchanged."
+            git status --short
+            git diff --name-only --diff-filter=U || true
+            exit 1
+          fi
+          # One-time migration helper must not remain on the resulting feature branch.
+          git rm -- .github/workflows/port-pr110.yml
+          git commit -m "feat: port PR 110 rooted chroot support onto DroidDeck 0.5.0"
+          git status --short
+          git push origin HEAD:refs/heads/feature/chroot-pr110-on-0.5.0
