@@ -45,6 +45,7 @@ fun PerformancePage(
     gamescopeRealtime: Boolean,
     gpuClockPin: Boolean,
     prootNoSeccomp: Boolean,
+    prootFastPath: Boolean,
     rootAvailable: Boolean,
     rootSession: Boolean,
     guestHostname: String,
@@ -61,6 +62,7 @@ fun PerformancePage(
     onGamescopeRealtime: (Boolean) -> Unit,
     onGpuClockPin: (Boolean) -> Unit,
     onProotNoSeccomp: (Boolean) -> Unit,
+    onProotFastPath: (Boolean) -> Unit,
     onRootSession: (Boolean) -> Unit,
     onGuestHostname: (String) -> Unit,
     onClientCore: (Int, Boolean) -> Unit,
@@ -152,6 +154,12 @@ fun PerformancePage(
                 host, "seccomp", stringResource(R.string.perf_seccomp),
                 stringResource(R.string.perf_seccomp_hint),
                 prootNoSeccomp, onChange = onProotNoSeccomp,
+            )
+            ToggleRow(
+                host, "fastpath", stringResource(R.string.perf_fastpath),
+                if (prootNoSeccomp) stringResource(R.string.perf_fastpath_needs_seccomp)
+                else stringResource(R.string.perf_fastpath_hint),
+                prootFastPath && !prootNoSeccomp, enabled = !prootNoSeccomp, onChange = onProotFastPath,
             )
             // Only where there is a root manager to use: elsewhere the switch would do nothing.
             if (rootAvailable) ToggleRow(
