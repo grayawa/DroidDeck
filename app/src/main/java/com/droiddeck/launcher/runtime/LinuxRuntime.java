@@ -7,7 +7,6 @@ import android.system.ErrnoException;
 import android.system.Os;
 import android.system.StructStat;
 import android.system.StructUtsname;
-import com.droiddeck.launcher.core.FileUtils;
 import com.droiddeck.launcher.session.SessionPrefs;
 
 
@@ -26,9 +25,9 @@ public final class LinuxRuntime {
     public static final String MODE_RUN = "run";
     public static final String EXTRA_LINUX_MODE = "linux_mode";
     private static final String KGSL_DEVICE = "/dev/kgsl-3d0";
-    /** Where Turnip's KGSL backend gets its shareable memory from; see {@link #bindGpuNode}. */
-    private static final String DMA_HEAP_DIR = "/dev/dma_heap";
-    /** Where every Linux session's debug log lands: public, so a user can just hand the folder over. */
+    public static final String GUEST_RUNTIME_DIR = "/run/droiddeck";
+    private static final String SYSTEM_FONTS = "/system/fonts";
+    private static final String GUEST_SYSTEM_FONTS = "/usr/local/share/fonts/android";
     public static final String DEBUG_LOG_DIR = "DroidDeck";
 
     public static File logDir(Context context) {
@@ -119,6 +118,14 @@ public final class LinuxRuntime {
             cmd.add("--bind");
             cmd.add(spec);
         }
+        // Unlike proot, rootrun creates a private /dev instead of binding all host nodes.
+        // Bind the physical GPU and DMA heaps explicitly for Turnip and Gamescope.
+        for (String device : new String[]{KGSL_DEVICE, "/dev/dma_heap"}) {
+            if (new File(device).exists()) {
+                cmd.add("--bind");
+                cmd.add(device);
+            }
+        }
         // The accounts the guest's own tools look the user up by, written where the guest reads them
         // (writeAccounts writes them in the app's copy of the runtime; the guest may not see it).
         try {
@@ -141,7 +148,6 @@ public final class LinuxRuntime {
         return cmd;
     }
 
-    /** The rootfs is present with gamescope and the session script the launcher hands control to. */
     public static boolean isInstalled(Context context) {
         if (LinuxRuntimeInstaller.isRemoving() || LinuxRuntimeInstaller.hasRemovalPending(context)) return false;
         File root = rootDir(context);
@@ -162,17 +168,30 @@ public final class LinuxRuntime {
         return manifests.length > 0 ? manifests[0] : null;
     }
 
-    /**
-     * The host paths the session needs inside the guest, as {@code host:guest} pairs: the app's own
-     * directories for the compositor and audio sockets, external storage for the user's games, and
-     * the device nodes the GPU and the pads live on. Bound at their own paths, so nothing on either
-     * side needs translating and proot never touches the fds a dma-buf travels in. Android has no
-     * /dev/shm; a directory under the cache stands in, which glibc's shm_open and Chromium's shared
-     * memory accept.
-     *
-     * One list, used by both ways into the guest - proot's {@code -b} and the rooted runner's
-     * {@code --bind} - so a rooted session mounts exactly what an unrooted one is given.
-     */
+    /** The exact host:guest bind specs that the rooted chroot runner consumes. */
+    public static List<String> bindSpecs(Context context, File sessionRoot, File runtimeDir,
+                                         File externalStorage, List<String> extraBinds) {
+        List<String> specs = binds(context, sessionRoot, runtimeDir, externalStorage, extraBinds);
+        if (sessionRoot != null) lastBinds = specs;
+        return specs;
+    }
+
+    public static List<String> command(Context context, File sessionRoot, File runtimeDir,
+                                       File externalStorage, List<String> guestCommand) {
+        return command(context, sessionRoot, runtimeDir, externalStorage, null, guestCommand);
+    }
+
+    public static List<String> command(Context context, File sessionRoot, File runtimeDir,
+                                       File externalStorage, List<String> extraBinds,
+                                       List<String> guestCommand) {
+        File root = rootDir(context);
+        List<String> binds = binds(context, sessionRoot, runtimeDir, externalStorage, extraBinds);
+        if (sessionRoot != null) lastBinds = binds;
+        List<String> cmd = prootPrefix(context, root, "/root");
+        for (String spec : binds) bind(cmd, spec);
+        cmd.addAll(guestCommand);
+        return cmd;
+    }
 
     private static volatile List<String> lastBinds;
 
@@ -208,31 +227,38 @@ public final class LinuxRuntime {
     public static List<String> binds(Context context, File sessionRoot, File runtimeDir,
                                      File externalStorage, List<String> extraBinds) {
         File root = rootDir(context);
-        List<String> specs = new ArrayList<>();
-        add(specs, "/dev");
-        add(specs, "/proc");
-        add(specs, "/sys");
-        add(specs, "/dev/urandom:/dev/random");
-        add(specs, "/proc/self/fd:/dev/fd");
-        add(specs, "/proc/self/fd/0:/dev/stdin");
-        add(specs, "/proc/self/fd/1:/dev/stdout");
-        add(specs, "/proc/self/fd/2:/dev/stderr");
-        add(specs, new File(root, "etc/bannerlator/empty").getPath() + ":/sys/fs/selinux");
-        add(specs, context.getFilesDir().getPath());
-        add(specs, context.getCacheDir().getPath());
-        if (runtimeDir != null) add(specs, runtimeDir.getPath());
-        if (sessionRoot != null) add(specs, sessionRoot.getPath());
-        if (externalStorage != null && externalStorage.isDirectory()) add(specs, externalStorage.getPath());
-        File shm = new File(context.getCacheDir(), "shm");
+        LegacyNames.migrateEtc(root);
+        List<String> cmd = new ArrayList<>();
+        bind(cmd, "/dev");
+        bind(cmd, "/proc");
+        bind(cmd, "/sys");
+        bind(cmd, "/dev/urandom:/dev/random");
+        bind(cmd, "/proc/self/fd:/dev/fd");
+        bind(cmd, "/proc/self/fd/0:/dev/stdin");
+        bind(cmd, "/proc/self/fd/1:/dev/stdout");
+        bind(cmd, "/proc/self/fd/2:/dev/stderr");
+        bind(cmd, new File(root, "etc/droiddeck/empty").getPath() + ":/sys/fs/selinux");
+        bind(cmd, context.getFilesDir().getPath());
+        bind(cmd, context.getCacheDir().getPath());
+        bind(cmd, liveDir(context).getPath());
+        if (runtimeDir != null) {
+            bind(cmd, runtimeDir.getPath());
+            bind(cmd, runtimeDir.getPath() + ":" + GUEST_RUNTIME_DIR);
+        }
+        if (sessionRoot != null) bind(cmd, sessionRoot.getPath());
+        if (externalStorage != null && externalStorage.isDirectory()) {
+            bind(cmd, externalStorage.getPath());
+        }
+        File shm = new File(liveDir(context), "shm");
         shm.mkdirs();
-        add(specs, shm.getPath() + ":/dev/shm");
+        bind(cmd, shm.getPath() + ":/dev/shm");
+        bindSystemFonts(cmd, root);
 
-        // Android denies these; glibc, Steam and libcap read them at startup.
-        File fakeProc = new File(root, "etc/bannerlator/proc");
+        File fakeProc = new File(root, "etc/droiddeck/proc");
         File pciDevices = new File(fakeProc, "pci_devices");
         if (!pciDevices.isFile()) {
             try {
-                fakeProc.mkdirs();
+                pciDevices.getParentFile().mkdirs();
                 pciDevices.createNewFile();
             } catch (java.io.IOException e) {
             }
@@ -264,58 +290,36 @@ public final class LinuxRuntime {
         };
         for (String[] entry : procFiles) {
             File fake = new File(fakeProc, entry[0]);
-            if (fake.isFile() && !new File(entry[1]).canRead()) {
-                add(specs, fake.getPath() + ":" + entry[1]);
+            boolean live = false;
+            if (extraBinds != null) for (String spec : extraBinds) live |= spec.endsWith(":" + entry[1]);
+            if (!live && fake.isFile() && !new File(entry[1]).canRead()) {
+                bind(cmd, fake.getPath() + ":" + entry[1]);
             }
         }
-        bindGpuNode(context, specs);
-        bindAdrenoStats(specs);
-        bindCpuTemps(specs, root);
-        if (extraBinds != null) {
-            for (String spec : extraBinds) add(specs, spec);
+        if (unreadablePciDevice()) {
+            bind(cmd, new File(root, "etc/droiddeck/empty").getPath() + ":/sys/bus/pci/devices");
         }
+        bindGpuNode(context, cmd);
+        bindAdrenoStats(cmd, extraBinds);
+        bindCpuTemps(cmd, root);
+        if (extraBinds != null) {
+            for (String spec : extraBinds) bind(cmd, spec);
+        }
+        List<String> specs = new ArrayList<>();
+        for (int i = 0; i + 1 < cmd.size(); i += 2) specs.add(cmd.get(i + 1));
         return specs;
     }
 
-    /** Compatibility name used by the rooted runner and its command-line test. */
-    public static List<String> bindSpecs(Context context, File sessionRoot, File runtimeDir,
-                                         File externalStorage, List<String> extraBinds) {
-        List<String> specs = binds(context, sessionRoot, runtimeDir, externalStorage, extraBinds);
-        if (sessionRoot != null) lastBinds = specs;
-        return specs;
+    private static boolean unreadablePciDevice() {
+        File[] devices = new File("/sys/bus/pci/devices").listFiles();
+        if (devices == null) return false;
+        for (File device : devices) {
+            if (!new File(device, "vendor").canRead()) return true;
+        }
+        return false;
     }
 
-    /**
-     * The proot command line running {@code guestCommand} inside the rootfs.
-     */
-    public static List<String> command(Context context, File sessionRoot, File runtimeDir,
-                                       File externalStorage, List<String> guestCommand) {
-        return command(context, sessionRoot, runtimeDir, externalStorage, null, guestCommand);
-    }
-
-    /** As above, plus {@code host:guest} bind specs - the installed games handed to Steam. */
-    public static List<String> command(Context context, File sessionRoot, File runtimeDir,
-                                       File externalStorage, List<String> extraBinds,
-                                       List<String> guestCommand) {
-        File root = rootDir(context);
-        List<String> binds = binds(context, sessionRoot, runtimeDir, externalStorage, extraBinds);
-        // A session's binds are the view its programs have; a one-off command's are not recorded.
-        if (sessionRoot != null) lastBinds = binds;
-        List<String> cmd = prootPrefix(context, root, "/root");
-        for (String spec : binds) bind(cmd, spec);
-        cmd.addAll(guestCommand);
-        return cmd;
-    }
-
-    /**
-     * An app process may not open {@code /dev/dri} - the nodes exist but are labelled
-     * {@code graphics_device}, which stock policy grants surfaceflinger and not us - yet libdrm and
-     * everything built on it identify a GPU by its render node, and gamescope refuses to offer
-     * linux-dmabuf without one. The KGSL device Turnip actually drives ({@code gpu_device}, which we
-     * may open) stands in: it appears as a render node with the sysfs entries libdrm reads, and our
-     * Turnip build reports the same device numbers for it.
-     */
-    private static void bindGpuNode(Context context, List<String> specs) {
+    private static void bindGpuNode(Context context, List<String> cmd) {
         StructStat st;
         try {
             st = Os.stat(KGSL_DEVICE);
@@ -331,29 +335,7 @@ public final class LinuxRuntime {
         File device = new File(base, "sys/" + major + ":" + minor + "/device");
         File drm = new File(device, "drm/" + node);
         try {
-            // The tree this builds is what libdrm enumerates and what Mesa reads the node's device
-            // numbers from: /dev/dri/<node> (bound from the KGSL device), and beside it a sysfs
-            // view whose <major>:<minor>/device/drm/<node>/dev says which char device it is.
-            //
-            if ((!dri.isDirectory() && !dri.mkdirs()) || (!device.isDirectory() && !device.mkdirs())) {
-                return;
-            }
-            // Rebuild the node's directory every session, whatever is there now.
-            //
-            // It must be rebuilt rather than "created if missing": `mkdirs()` succeeds for a path
-            // that already exists, so a tree laid out wrong once - which an earlier version of this
-            // method did, mkdir'ing the node directory and writing `dev` inside it - stayed wrong
-            // for every later session, and Mesa failed with "failed to query kernel driver version
-            // for device /dev/dri/renderD0" while every log said the session had started normally
-            // (measured on a Galaxy S23).
-            //
-            // A delete that does not take (a directory owned by root, left by a session that ran
-            // through the rooted path, which starts as root) is reported and the tree is left
-            // alone: writing into a directory this app does not own fails anyway, and the caller
-            // gets a log line rather than a silent half-tree.
-            FileUtils.delete(drm);
-            if (!drm.mkdirs() && !drm.isDirectory()) {
-                android.util.Log.e("LinuxRuntime", "cannot rebuild the GPU tree at " + drm);
+            if ((!dri.isDirectory() && !dri.mkdirs()) || (!drm.isDirectory() && !drm.mkdirs())) {
                 return;
             }
             new File(dri, node).createNewFile();
@@ -365,46 +347,47 @@ public final class LinuxRuntime {
             if (!Files.isSymbolicLink(subsystem.toPath())) {
                 Os.symlink("/sys/bus/platform", subsystem.getPath());
             }
-            // And prove it, because a malformed tree is invisible from here on: the guest starts,
-            // gamescope runs, and only the GPU is missing.
-            File devFile = new File(drm, "dev");
-            String written = FileUtils.readString(devFile);
-            if (!devFile.isFile() || written == null || !written.trim().equals(major + ":" + minor)) {
-                android.util.Log.e("LinuxRuntime", "GPU tree is malformed: " + devFile + " says " + written);
-                return;
+            File driver = new File(device, "driver");
+            if (!Files.isSymbolicLink(driver.toPath())) {
+                Os.symlink("/sys/bus/platform/drivers/msm_drm", driver.getPath());
             }
         } catch (IOException | ErrnoException e) {
             return;
         }
-        add(specs, new File(base, "sys").getPath() + ":/sys/dev/char");
-        add(specs, dri.getPath() + ":/dev/dri");
-        add(specs, KGSL_DEVICE + ":/dev/dri/" + node);
-        // The node at its real path as well as the /dev/dri alias, and the dma-buf heap with it.
-        //
-        // Turnip picks its kernel backend by what it can open: with /dev/kgsl-3d0 present it uses
-        // KGSL and talks to the GPU through that node; without it, it enumerates /dev/dri, and
-        // there the alias above is a KGSL node wearing a DRM name, so the version ioctl it opens
-        // with answers ENOTTY and the driver reports "failed to query kernel driver version for
-        // device /dev/dri/renderD0" - the whole GPU is gone, and every log says the session
-        // started normally (measured on a Galaxy S23). Only the rooted path needs this: proot
-        // binds the host's whole /dev, so its guest always had both names.
-        //
-        // The heap is where Turnip's shareable memory comes from: without it every allocation
-        // fails and gamescope dies at "vkAllocateMemory failed" (same device, measured the same
-        // way). Bound whole rather than node by node, so a device with several heaps keeps them.
-        if (new File(KGSL_DEVICE).canRead()) add(specs, KGSL_DEVICE);
-        if (new File(DMA_HEAP_DIR).canRead()) add(specs, DMA_HEAP_DIR);
+        bind(cmd, new File(base, "sys").getPath() + ":/sys/dev/char");
+        bind(cmd, dri.getPath() + ":/dev/dri");
+        bind(cmd, KGSL_DEVICE + ":/dev/dri/" + node);
+        bindDrmClass(base, cmd, node, major + ":" + minor);
     }
 
-    /**
-     * Valve's mangoapp (Deck mode's performance overlay) reads an Adreno GPU's load, clock and
-     * temperatures from where they are on Valve's own hardware; every Adreno under Android keeps
-     * them in KGSL's sysfs, readable by the app, though which files a kernel has differs between
-     * Snapdragon generations - so each value takes the first source that exists, the order other
-     * Android PC emulators (GameNative, Winlator forks) read them in. A value found nowhere is left
-     * alone.
-     */
-    private static void bindAdrenoStats(List<String> specs) {
+    private static void bindDrmClass(File base, List<String> cmd, String node, String devNumbers) {
+        if (new File("/sys/class/drm").list() != null) return;
+        File drmClass = new File(base, "class");
+        try {
+            if (!drmClass.isDirectory() && !drmClass.mkdirs()) return;
+            File[] old = drmClass.listFiles();
+            if (old != null) for (File f : old) Files.deleteIfExists(f.toPath());
+            Os.symlink("/sys/dev/char/" + devNumbers, new File(drmClass, node).getPath());
+        } catch (IOException | ErrnoException e) {
+            return;
+        }
+        bind(cmd, drmClass.getPath() + ":/sys/class/drm");
+        android.util.Log.i("LinuxRuntime", "hud: /sys/class/drm is not listable here; the session's lists " + node);
+        if (new File("/sys/class/powercap").list() == null) {
+            File empty = new File(base, "empty-powercap");
+            if (empty.isDirectory() || empty.mkdirs()) bind(cmd, empty.getPath() + ":/sys/class/powercap");
+        }
+    }
+
+    public static String cpuTempSource() {
+        for (java.util.Map.Entry<String, File> e : new java.util.TreeMap<>(thermalZones()).entrySet()) {
+            File temp = new File(e.getValue(), "temp");
+            if (e.getKey().contains("cpu") && !e.getKey().contains("gpu") && temp.canRead()) return temp.getPath();
+        }
+        return null;
+    }
+
+    public static String gpuTempSource() {
         String kgsl = "/sys/class/kgsl/kgsl-3d0/";
         return firstReadable(kgsl + "temp", kgsl + "devfreq/temp", thermalZone("gpu"));
     }
@@ -426,7 +409,9 @@ public final class LinuxRuntime {
                 {thermalZone("ddr"), "/sys/class/thermal/thermal_zone22/temp"},
         };
         for (String[] stat : stats) {
-            if (stat[0] != null) add(specs, stat[0] + ":" + stat[1]);
+            boolean fed = false;
+            if (extraBinds != null) for (String spec : extraBinds) fed |= spec.endsWith(":" + stat[1]);
+            if (stat[0] != null && !fed) bind(cmd, stat[0] + ":" + stat[1]);
         }
         android.util.Log.i("LinuxRuntime", "hud sources: gpu load " + orNone(stats[0][0]) + ", gpu clock "
                 + orNone(stats[1][0]) + ", gpu temp " + orNone(gpuTemp) + ", ddr temp " + orNone(stats[4][0])
@@ -438,14 +423,8 @@ public final class LinuxRuntime {
         return path != null ? path : "none";
     }
 
-    /**
-     * mangoapp's CPU temperature is the mean of the thermal zones named cpuN-thermal or
-     * cpuN-top-thermal, as mainline kernels name them; Android kernels name the same sensors
-     * cpuss-0, cpu-1-0, cpu0-silver-usr, apc1-cpu0-usr and the like, so those zones are shown
-     * under the mainline name.
-     */
-    private static void bindCpuTemps(List<String> specs, File root) {
-        File name = new File(root, "etc/bannerlator/cpu-thermal-type");
+    private static void bindCpuTemps(List<String> cmd, File root) {
+        File name = new File(root, "etc/droiddeck/cpu-thermal-type");
         try {
             if (!name.isFile()) Files.write(name.toPath(), "cpu0-thermal\n".getBytes(StandardCharsets.US_ASCII));
         } catch (IOException e) {
@@ -454,7 +433,7 @@ public final class LinuxRuntime {
         for (java.util.Map.Entry<String, File> zone : thermalZones().entrySet()) {
             String type = zone.getKey();
             if (type.contains("cpu") && !type.contains("gpu") && !type.matches("cpu\\d-(top-)?thermal")) {
-                add(specs, name.getPath() + ":" + new File(zone.getValue(), "type").getPath());
+                bind(cmd, name.getPath() + ":" + new File(zone.getValue(), "type").getPath());
             }
         }
     }
@@ -488,12 +467,15 @@ public final class LinuxRuntime {
         return byType;
     }
 
-    /** A bare {@code host:guest} spec, for the rooted runner's --bind. */
-    private static void add(List<String> specs, String spec) {
-        specs.add(spec);
+    private static void bindSystemFonts(List<String> cmd, File root) {
+        File fonts = new File(SYSTEM_FONTS);
+        File target = new File(root, GUEST_SYSTEM_FONTS.substring(1));
+        if (!fonts.isDirectory() || !fonts.canRead() || !new File(root, "usr/local").isDirectory()) return;
+        if (target.isDirectory() || target.mkdirs()) {
+            bind(cmd, SYSTEM_FONTS + ":" + GUEST_SYSTEM_FONTS);
+        }
     }
 
-    /** The same spec as proot's -b argument. */
     private static void bind(List<String> cmd, String spec) {
         cmd.add("-b");
         cmd.add(spec);
