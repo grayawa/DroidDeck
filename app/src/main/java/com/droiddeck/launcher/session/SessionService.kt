@@ -31,6 +31,7 @@ import com.droiddeck.launcher.audio.DirectAudioRelayComponent
 import com.droiddeck.launcher.audio.PulseAudioComponent
 import com.droiddeck.launcher.core.CpuCores
 import com.droiddeck.launcher.core.DeviceReport
+import com.droiddeck.launcher.core.DeviceSupport
 import com.droiddeck.launcher.core.HostEnvironment
 import com.droiddeck.launcher.core.RootSession
 import com.droiddeck.launcher.core.SessionLogCapture
