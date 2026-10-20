@@ -539,6 +539,8 @@ class SessionService : Service() {
             it.replace("\\", "\\\\").replace(" ", "\\ ")
         }
         watchLaunchRequests(sessionRoot)
+        watchSyncWanted(root)
+        EsyncPacks.fetchInBackground(this, root)
         // One session replacing another (the desktop's Steam launchers): the old proot is killed
         // by the teardown a second after the new one has started, and its exit used to arrive
         // here as "session ended: 137" and end the NEW session. An exit belongs to the session
@@ -561,8 +563,9 @@ class SessionService : Service() {
                 if (gen != sessionGen) {
                     Log.i(TAG, "an earlier session's process ended ($s); the current one carries on")
                 } else {
-                    Log.i(TAG, "session ended: $s")
-                    stopSession(s ?: -1)
+                    val program = programStatus(sessionRoot)
+                    Log.i(TAG, "session ended: $s" + if (program != null) " (program $program)" else "")
+                    stopSession(program ?: s ?: -1)
                 }
             }
             val suPid = RootSession.start(argv.toTypedArray(), null, java.util.function.Consumer { status(it) }, null)
@@ -583,8 +586,9 @@ class SessionService : Service() {
                     Log.i(TAG, "an earlier session's process ended ($status); the current one carries on")
                     return@start
                 }
-                Log.i(TAG, "session ended: $status")
-                stopSession(status ?: -1)
+                val program = programStatus(sessionRoot)
+                Log.i(TAG, "session ended: $status" + if (program != null) " (program $program)" else "")
+                stopSession(program ?: status ?: -1)
             }, null)
         }
         Log.i(TAG, "session pid $pid, log ${sessionLog.path}")
