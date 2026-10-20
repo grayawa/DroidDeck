@@ -47,7 +47,7 @@ class RootRunnerCommandTest {
         val command = LinuxRuntime.rootRunnerCommand(
             context, File("/native/librootrun.so"), File(sessionRoot, "guest.pid"),
             sessionRoot, runtimeDir, null, listOf("/host/games:/games"),
-            listOf("HOME=/root", "BL_WIDTH=1920"), listOf("/usr/local/bin/bannerlator-session", "steam"),
+            listOf("HOME=/root", "BL_WIDTH=1920"), listOf("/usr/local/bin/droiddeck-session", "steam"),
         )
         val binds = argumentsOf(command, "--bind")
 
@@ -68,7 +68,7 @@ class RootRunnerCommandTest {
 
         assertEquals(listOf("HOME=/root", "BL_WIDTH=1920"), argumentsOf(command, "--env"))
         assertEquals(
-            listOf("/usr/local/bin/bannerlator-session", "steam"),
+            listOf("/usr/local/bin/droiddeck-session", "steam"),
             command.drop(command.indexOf("--") + 1),
         )
         assertEquals("/root", argumentsOf(command, "--dir").single())
@@ -90,7 +90,7 @@ class RootRunnerCommandTest {
         sessionRoot = File(context.cacheDir, "session").apply { mkdirs() }
         runtimeDir = File(context.cacheDir, "wayland-rt").apply { mkdirs() }
         // prootPrefix() reads uname for the guest's kernel identity, which Robolectric leaves null.
-        val guest = listOf("/usr/local/bin/bannerlator-session", "steam")
+        val guest = listOf("/usr/local/bin/droiddeck-session", "steam")
         val command = LinuxRuntime.command(
             context, sessionRoot, runtimeDir, null, listOf("/host/games:/games"), guest,
         )
