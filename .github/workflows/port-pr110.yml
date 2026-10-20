@@ -30,11 +30,19 @@ jobs:
           echo "PR 110 head: $(git rev-parse refs/remotes/upstream/pr110)"
           test "$(git rev-parse refs/remotes/upstream/pr110)" = "7439a4d5df51c84650540b8d70b8ad0206801478"
           if ! git merge -s ort -X theirs --no-ff --no-commit refs/remotes/upstream/pr110; then
-            echo "::error::Automatic 3-way merge has unresolved conflicts; branch left unchanged."
-            git status --short
-            git diff --name-only --diff-filter=U || true
-            exit 1
+            # PR 110 edited the old bannerlator-session script; upstream 0.5.0
+            # replaced that file with the droiddeck-session/steam-launch split.
+            # Keep the new layout; never revive the removed pre-0.5.0 script.
+            unresolved="$(git diff --name-only --diff-filter=U)"
+            if [[ "$unresolved" == "tools/linuxfs/overlay/usr/local/bin/bannerlator-session" ]]; then
+              git rm -- tools/linuxfs/overlay/usr/local/bin/bannerlator-session
+            else
+              echo "::error::Unexpected unresolved 3-way merge conflict(s): $unresolved"
+              git status --short
+              exit 1
+            fi
           fi
+          test -z "$(git diff --name-only --diff-filter=U)"
           # One-time migration helper must not remain on the resulting feature branch.
           git rm -- .github/workflows/port-pr110.yml
           git commit -m "feat: port PR 110 rooted chroot support onto DroidDeck 0.5.0"
