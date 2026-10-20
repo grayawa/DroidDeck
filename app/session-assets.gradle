@@ -1,7 +1,7 @@
 /*
  * The session's own files are staged into the APK from app/src/main/assets/linuxfs/, which is a
  * BUILD OUTPUT: tools/build_local.sh (and the CI workflow) cross-compile the two preloads and copy
- * the overlay scripts, the desktop launcher and the labwc/LXQt configuration in there. Nothing in
+ * the overlay scripts and desktop launchers in there. Nothing in
  * git produces it.
  *
  * A build that skips that step is not obviously broken - it compiles, installs, and starts a
@@ -19,15 +19,15 @@ def sessionAssets = [
         // Required: the app opens each of these at session start and the guest needs them.
         "linuxfs/libblsession.so"                              : "the SysV/DRM preload the session's /etc/ld.so.preload names",
         "linuxfs/libfakeinput.so"                              : "the fake evdev layer the controller goes through",
-        "linuxfs/usr/local/bin/bannerlator-session"            : "the session script the launcher hands control to",
-        "linuxfs/usr/local/bin/bannerlator-steam-install"      : "the Steam client installer (steam mode)",
-        "linuxfs/usr/local/bin/bannerlator-steam-compat"       : "the Proton/compat registrar (steam mode)",
-        "linuxfs/usr/local/bin/bannerlator-seed-redists"       : "the redistributable seeder (steam mode)",
-        "linuxfs/usr/local/bin/bannerlator-pad-defaults"       : "controller defaults for a new game (run mode)",
+        "linuxfs/usr/local/bin/droiddeck-session"            : "the session script the launcher hands control to",
+        "linuxfs/usr/local/bin/droiddeck-steam-install"      : "the Steam client installer (steam mode)",
+        "linuxfs/usr/local/bin/droiddeck-steam-compat"       : "the Proton/compat registrar (steam mode)",
+        "linuxfs/usr/local/bin/droiddeck-seed-redists"       : "the redistributable seeder (steam mode)",
+        "linuxfs/usr/local/bin/droiddeck-pad-defaults"       : "controller defaults for a new game (run mode)",
         "linuxfs/usr/local/bin/droiddeck-desktop"              : "the hosted desktop launcher (desktop mode)",
-        "linuxfs/etc/xdg/labwc/autostart"                      : "what the desktop starts with (desktop mode)",
-        "linuxfs/etc/xdg/labwc/rc.xml"                         : "labwc's keybinds and window rules (desktop mode)",
-        "linuxfs/etc/xdg/lxqt/panel.conf"                      : "the LXQt panel's layout (desktop mode)",
+        "linuxfs/usr/local/bin/droiddeck-desktop-gpu"          : "the GPU-enabled desktop launcher (desktop mode)",
+        "linuxfs/usr/local/bin/droiddeck-gpu"                  : "the desktop GPU runner (desktop mode)",
+        "linuxfs/usr/local/bin/kwin_wayland_wrapper"           : "the current desktop compositor wrapper (desktop mode)",
 ]
 
 def optionalSessionAssets = [
@@ -39,7 +39,9 @@ def optionalSessionAssets = [
 tasks.register("checkSessionAssets") {
     group = "verification"
     description = "Fails when the APK is being built without the session files staged from tools/build_local.sh."
-    def assetsDir = layout.projectDirectory.dir("src/main/assets")
+    // Check the effective APK staging directory after all source scripts are copied.
+    dependsOn("stageRuntimeAssets")
+    def assetsDir = layout.buildDirectory.dir("runtimeAssets")
     doLast {
         def missing = sessionAssets.findAll { !new File(assetsDir.asFile, it.key).isFile() }
         if (!missing.isEmpty()) {
