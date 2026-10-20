@@ -314,6 +314,7 @@ else
     echo "${proot_inputs}" > "${proot_out}/.proot-inputs"
     (cd "${proot_out}" && shasum -a 256 libproot.so libproot-loader.so > .proot-outputs)
 fi
+"${repo_root}/tools/rootrun/build.sh" "${repo_root}/app/src/main/jniLibs/arm64-v8a"
 
 bundle_dir="${staging_dir}/pulseaudio-bundle"
 mkdir -p "${bundle_dir}"

@@ -79,6 +79,75 @@ public final class LinuxRuntime {
         return dir.equals(prootBinary(context).getParentFile()) ? dir.getPath() : "";
     }
 
+    /**
+     * The rooted session's chroot runner, or null when this build carries none. It is executed
+     * from the native library directory, which is the only place an app may run a program from.
+     */
+    public static File rootRunner(Context context) {
+        File packaged = new File(context.getApplicationInfo().nativeLibraryDir, "librootrun.so");
+        return packaged.isFile() ? packaged : null;
+    }
+
+    /**
+     * The runner's command line: what to mount where, the guest's environment, and the program.
+     *
+     * The mounts are the same {@code host:guest} pairs proot is given, so a rooted session sees
+     * what an unrooted one does. The guest's own /proc, /sys and /dev are mounted by the runner
+     * rather than bound, so they are not in the list.
+     */
+    public static List<String> rootRunnerCommand(Context context, File runner, File pidFile,
+                                                 File sessionRoot, File runtimeDir,
+                                                 File externalStorage, List<String> extraBinds,
+                                                 List<String> guestEnv, List<String> guestProgram) {
+        List<String> cmd = new ArrayList<>();
+        cmd.add(runner.getPath());
+        cmd.add("--root");
+        cmd.add(rootDir(context).getPath());
+        cmd.add("--dir");
+        cmd.add("/root");
+        cmd.add("--hostname");
+        cmd.add(SessionPrefs.guestHostname(context));
+        cmd.add("--pidfile");
+        cmd.add(pidFile.getPath());
+        cmd.add("--uid");
+        cmd.add(String.valueOf(Process.myUid()));
+        cmd.add("--gid");
+        cmd.add(String.valueOf(Process.myUid()));
+        for (String spec : binds(context, sessionRoot, runtimeDir, externalStorage, extraBinds)) {
+            if (spec.equals("/proc") || spec.equals("/sys") || spec.equals("/dev")) continue;
+            cmd.add("--bind");
+            cmd.add(spec);
+        }
+        // Unlike proot, rootrun creates a private /dev instead of binding all host nodes.
+        // Bind the physical GPU and DMA heaps explicitly for Turnip and Gamescope.
+        for (String device : new String[]{KGSL_DEVICE, "/dev/dma_heap"}) {
+            if (new File(device).exists()) {
+                cmd.add("--bind");
+                cmd.add(device);
+            }
+        }
+        // The accounts the guest's own tools look the user up by, written where the guest reads them
+        // (writeAccounts writes them in the app's copy of the runtime; the guest may not see it).
+        try {
+            int uid = Process.myUid();
+            cmd.add("--write");
+            cmd.add("/etc/passwd:root:x:" + uid + ":" + uid + ":root:/root:/bin/bash");
+            cmd.add("--write");
+            cmd.add("/etc/group:root:x:" + uid + ":");
+        } catch (Throwable ignored) {
+        }
+        if (guestEnv != null) {
+            for (String line : guestEnv) {
+                if (line.indexOf('=') <= 0) continue;
+                cmd.add("--env");
+                cmd.add(line);
+            }
+        }
+        cmd.add("--");
+        cmd.addAll(guestProgram);
+        return cmd;
+    }
+
     public static boolean isInstalled(Context context) {
         if (LinuxRuntimeInstaller.isRemoving() || LinuxRuntimeInstaller.hasRemovalPending(context)) return false;
         File root = rootDir(context);
@@ -97,6 +166,14 @@ public final class LinuxRuntime {
             if (manifest.getName().contains("freedreno")) return manifest;
         }
         return manifests.length > 0 ? manifests[0] : null;
+    }
+
+    /** The exact host:guest bind specs that the rooted chroot runner consumes. */
+    public static List<String> bindSpecs(Context context, File sessionRoot, File runtimeDir,
+                                         File externalStorage, List<String> extraBinds) {
+        List<String> specs = binds(context, sessionRoot, runtimeDir, externalStorage, extraBinds);
+        if (sessionRoot != null) lastBinds = specs;
+        return specs;
     }
 
     public static List<String> command(Context context, File sessionRoot, File runtimeDir,
