@@ -43,8 +43,10 @@ jobs:
             fi
           fi
           test -z "$(git diff --name-only --diff-filter=U)"
-          # One-time migration helper must not remain on the resulting feature branch.
-          git rm -- .github/workflows/port-pr110.yml
+          # The GitHub Actions token cannot modify workflow files. Preserve both
+          # workflows here; the GitHub connector will add the needed rootrun step
+          # to build.yml in a separate commit after the code merge.
+          git checkout HEAD -- .github/workflows/build.yml
           git commit -m "feat: port PR 110 rooted chroot support onto DroidDeck 0.5.0"
           git status --short
           git push origin HEAD:refs/heads/feature/chroot-pr110-on-0.5.0
