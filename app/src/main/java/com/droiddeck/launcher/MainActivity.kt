@@ -154,6 +154,7 @@ class MainActivity : ComponentActivity() {
     private var gamescopeRealtime by mutableStateOf(false)
     private var gpuClockPin by mutableStateOf(false)
     private var prootNoSeccomp by mutableStateOf(false)
+    private var prootFastPath by mutableStateOf(true)
     private var rootAvailable by mutableStateOf(false)
     private var rootSession by mutableStateOf(true)
     private var guestHostname by mutableStateOf(SessionPrefs.DEFAULT_GUEST_HOSTNAME)
@@ -1761,7 +1762,8 @@ class MainActivity : ComponentActivity() {
             fsyncFirst = fsyncFirst,
             gamescopeRealtime = gamescopeRealtime,
             gpuClockPin = gpuClockPin,
-            prootNoSeccomp = prootNoSeccomp, rootAvailable = rootAvailable, rootSession = rootSession,
+            prootNoSeccomp = prootNoSeccomp, prootFastPath = prootFastPath,
+            rootAvailable = rootAvailable, rootSession = rootSession,
             guestHostname = guestHostname, phantomWarning = phantomWarning,
             onClientOverride = { on -> SessionPrefs.setClientCpusOverride(this, on); clientOverride = on },
             onTuSysmem = { on -> SessionPrefs.setTuSysmem(this, on); tuSysmem = on },
@@ -1775,6 +1777,7 @@ class MainActivity : ComponentActivity() {
             onGamescopeRealtime = { on -> SessionPrefs.setGamescopeRealtime(this, on); gamescopeRealtime = on },
             onGpuClockPin = { on -> SessionPrefs.setGpuClockPin(this, on); gpuClockPin = on },
             onProotNoSeccomp = { on -> SessionPrefs.setProotNoSeccomp(this, on); prootNoSeccomp = on },
+            onProotFastPath = { on -> SessionPrefs.setProotFastPath(this, on); prootFastPath = on },
             onRootSession = { on -> SessionPrefs.setRootSession(this, on); rootSession = on },
             onGuestHostname = { name -> SessionPrefs.setGuestHostname(this, name) },
             onClientCore = { core, on ->
@@ -1932,6 +1935,7 @@ class MainActivity : ComponentActivity() {
         gamescopeRealtime = SessionPrefs.gamescopeRealtime(this)
         gpuClockPin = SessionPrefs.gpuClockPin(this)
         prootNoSeccomp = SessionPrefs.prootNoSeccomp(this)
+        prootFastPath = SessionPrefs.prootFastPath(this)
         rootAvailable = SessionPrefs.rootAvailable(this)
         rootSession = SessionPrefs.rootSession(this)
         guestHostname = SessionPrefs.guestHostname(this)
