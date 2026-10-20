@@ -27,6 +27,7 @@
 #include "presentation-time-server-protocol.h"
 #include "pointer-constraints-unstable-v1-server-protocol.h"
 #include "relative-pointer-unstable-v1-server-protocol.h"
+#include "xdg-output-unstable-v1-server-protocol.h"
 #include "vk_present.h"
 #include "framegen_bridge.h"
 #include <pthread.h>
@@ -1563,6 +1564,67 @@ static void bind_output(struct wl_client *c, void *data, uint32_t ver, uint32_t 
     }
 }
 
+/* ------------------------------------------------------- zxdg_output_manager_v1 */
+
+/* SDL2's Wayland video driver refuses to create a window at all when this global is missing:
+ *
+ *   ERROR: wayland: Display scaling requires the missing 'zxdg_output_manager_v1' protocol: disabling
+ *   SDL_Vulkan_CreateSurface failed: ...Failed to create backend.
+ *
+ * which is what gamescope's nested Wayland backend goes through (it drives SDL_Vulkan_CreateSurface),
+ * so without it a session only starts when gamescope happens to take a different backend. Nothing
+ * here needs the protocol's content - one output, one scale - but it must exist and answer.
+ *
+ * v3 makes the output's own wl_output.done the completion signal and drops this object's `done`;
+ * before that a client waits for the xdg_output done after the wl_output events, so it is sent
+ * here, where the wl_output has already sent geometry, mode and scale. */
+static void xdg_output_destroy(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
+
+static const struct zxdg_output_v1_interface xdg_output_impl = {
+    .destroy = xdg_output_destroy,
+};
+
+static void xdg_output_manager_destroy(struct wl_client *c, struct wl_resource *r) {
+    wl_resource_destroy(r);
+}
+
+static void xdg_output_manager_get(struct wl_client *c, struct wl_resource *r, uint32_t id,
+                                   struct wl_resource *output) {
+    /* The version the client asked for on the manager, which is the one it expects here. */
+    uint32_t ver = wl_resource_get_version(r);
+    struct wl_resource *xo = wl_resource_create(c, &zxdg_output_v1_interface, ver, id);
+    if (!xo) { wl_client_post_no_memory(c); return; }
+    wl_resource_set_implementation(xo, &xdg_output_impl, NULL, NULL);
+    wl_resource_set_user_data(xo, output);
+    /* Only this object's own events. The wl_output's geometry, mode, scale, name and description
+     * are sent when it is bound and must not be repeated here: a second `name` is a protocol error
+     * for the client ("An output named 'X' already exists") and a second `geometry` resets what it
+     * already took. The xdg_output object adds the logical position and size on top. */
+    zxdg_output_v1_send_logical_position(xo, 0, 0);
+    zxdg_output_v1_send_logical_size(xo, g_output_w > 0 ? g_output_w : 1920,
+                                     g_output_h > 0 ? g_output_h : 1080);
+    /* Name and description are v2+; sending them to a v1 client is a protocol error. */
+    if (ver >= 2) {
+        zxdg_output_v1_send_name(xo, "Bannerlator-1");
+        zxdg_output_v1_send_description(xo, "Bannerlator display");
+    }
+    /* Below v3 this object's `done` is what completes the output; at v3+ the wl_output's own
+     * `done` does, and sending this one as well is a protocol error. */
+    if (ver < 3) zxdg_output_v1_send_done(xo);
+}
+
+static const struct zxdg_output_manager_v1_interface xdg_output_manager_impl = {
+    .destroy = xdg_output_manager_destroy,
+    .get_xdg_output = xdg_output_manager_get,
+};
+
+static void bind_xdg_output_manager(struct wl_client *c, void *data, uint32_t ver, uint32_t id) {
+    struct wl_resource *r = wl_resource_create(c, &zxdg_output_manager_v1_interface, ver, id);
+    if (!r) { wl_client_post_no_memory(c); return; }
+    wl_resource_set_implementation(r, &xdg_output_manager_impl, NULL, NULL);
+}
+
+/* ------------------------------------------------------------------ rendering */
 
 struct draw_list { struct vkp_draw *d; int n, cap; };
 
@@ -3266,6 +3328,9 @@ int droiddeck_wayland_run(void) {
     wl_display_init_shm(display);
 
     wl_global_create(display, &wl_output_interface, 4, NULL, bind_output);
+    /* Advertised at 3: what SDL2 and Qt ask for, and the version whose wl_output.done completes
+     * the output. See the zxdg_output_manager_v1 block for why a missing global kills a session. */
+    wl_global_create(display, &zxdg_output_manager_v1_interface, 3, NULL, bind_xdg_output_manager);
     wl_global_create(display, &xdg_wm_base_interface, 1, NULL, bind_xdg_wm_base);
     wl_global_create(display, &zwp_linux_dmabuf_v1_interface, 4, NULL, bind_dmabuf);
     wl_global_create(display, &wl_seat_interface, 9, NULL, bind_seat);

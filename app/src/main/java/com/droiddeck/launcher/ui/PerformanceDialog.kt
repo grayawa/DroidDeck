@@ -45,7 +45,8 @@ fun PerformancePage(
     gamescopeRealtime: Boolean,
     gpuClockPin: Boolean,
     prootNoSeccomp: Boolean,
-    prootFastPath: Boolean,
+    rootAvailable: Boolean,
+    rootSession: Boolean,
     guestHostname: String,
     phantomWarning: String?,
     onClientOverride: (Boolean) -> Unit,
@@ -60,7 +61,7 @@ fun PerformancePage(
     onGamescopeRealtime: (Boolean) -> Unit,
     onGpuClockPin: (Boolean) -> Unit,
     onProotNoSeccomp: (Boolean) -> Unit,
-    onProotFastPath: (Boolean) -> Unit,
+    onRootSession: (Boolean) -> Unit,
     onGuestHostname: (String) -> Unit,
     onClientCore: (Int, Boolean) -> Unit,
     onGameCore: (Int, Boolean) -> Unit,
@@ -152,11 +153,14 @@ fun PerformancePage(
                 stringResource(R.string.perf_seccomp_hint),
                 prootNoSeccomp, onChange = onProotNoSeccomp,
             )
-            ToggleRow(
-                host, "fastpath", stringResource(R.string.perf_fastpath),
-                if (prootNoSeccomp) stringResource(R.string.perf_fastpath_needs_seccomp)
-                else stringResource(R.string.perf_fastpath_hint),
-                prootFastPath && !prootNoSeccomp, enabled = !prootNoSeccomp, onChange = onProotFastPath,
+            // Only where there is a root manager to use: elsewhere the switch would do nothing.
+            if (rootAvailable) ToggleRow(
+                host, "root", "Enter the session with chroot (experimental)",
+                "Runs the session through chroot instead of proot, with no syscall tracer in the " +
+                    "middle. Needs a sepolicy rule that lets one domain both mount the rootfs and " +
+                    "use the GPU: without it the session starts and cannot draw. Off, the session " +
+                    "runs under proot as usual.",
+                rootSession, onChange = onRootSession,
             )
         }
         SettingsGroup(stringResource(R.string.perf_identity)) {

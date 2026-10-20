@@ -342,3 +342,6 @@ dependencies {
     testImplementation 'androidx.compose.ui:ui-test-junit4'
     testRuntimeOnly 'com.github.luben:zstd-jni:1.5.7-4@jar'
 }
+
+// The session's own files are staged from tools/build_local.sh; this fails a build that skips it.
+apply from: 'session-assets.gradle'

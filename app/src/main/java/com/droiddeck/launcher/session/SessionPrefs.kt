@@ -979,6 +979,26 @@ object SessionPrefs {
         prefs(context).edit().putBoolean("zramCompression", on).apply()
     }
 
+    /**
+     * Whether a rooted device runs the session through chroot instead of proot.
+     *
+     * Off by default: chroot is experimental and remains a separate opt-in path while it is
+     * validated across root managers and devices. Proot remains the safe default; chroot can be
+     * enabled for testing the rooted path and its GPU bindings.
+     */
+    fun rootSession(context: Context): Boolean = prefs(context).getBoolean("rootSession", false)
+
+    fun setRootSession(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("rootSession", on).apply()
+    }
+
+    /** The last probe's answer, so a screen can show it without making a root manager prompt. */
+    fun rootAvailable(context: Context): Boolean = prefs(context).getBoolean("rootAvailable", false)
+
+    fun setRootAvailable(context: Context, available: Boolean) {
+        prefs(context).edit().putBoolean("rootAvailable", available).apply()
+    }
+    // ── Game storage ────────────────────────────────────────────────────────────────────────
 
     fun gameStorage(context: Context): String = prefs(context).getString("gameStorage", "") ?: ""
 
