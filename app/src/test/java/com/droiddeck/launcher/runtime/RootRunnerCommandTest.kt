@@ -52,9 +52,13 @@ class RootRunnerCommandTest {
         val binds = argumentsOf(command, "--bind")
 
         // /proc, /sys and /dev are mounted by the runner itself, so they are not binds.
-        val expected = specs.filter { it != "/proc" && it != "/sys" && it != "/dev" }
-        assertEquals(expected, binds)
-        assertEquals(specs.size, binds.size + 3)
+        // A rooted guest's private /dev must also expose the host's GPU and DMA heaps.
+        // Proot gets those from the host /dev and needs no separate binds.
+        val shared = specs.filter { it != "/proc" && it != "/sys" && it != "/dev" }
+        val rootedDevices = listOf("/dev/kgsl-3d0", "/dev/dma_heap")
+            .filter { File(it).exists() }
+        assertEquals(shared + rootedDevices, binds)
+        assertEquals(specs.size + rootedDevices.size, binds.size + 3)
 
         // The app's own directories are bound at their own paths, so a spec without a colon means
         // exactly that; one with a colon names the guest side, which must be absolute - the runner
